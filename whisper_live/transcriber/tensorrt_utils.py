@@ -27,7 +27,7 @@ import av
 import wave
 import torch
 import torch.nn.functional as F
-from whisper_live.utils import resample
+from utils import resample
 
 
 Pathlike = Union[str, Path]

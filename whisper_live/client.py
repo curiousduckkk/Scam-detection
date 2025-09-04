@@ -11,7 +11,7 @@ import websocket
 import uuid
 import time
 import av
-import whisper_live.utils as utils
+import utils as utils
 
 
 class Client:
@@ -771,7 +771,7 @@ class TranscriptionClient(TranscriptionTeeClient):
         self,
         host,
         port,
-        lang=None,
+        lang="hi",
         translate=False,
         model="small",
         use_vad=True,
@@ -786,8 +786,8 @@ class TranscriptionClient(TranscriptionTeeClient):
         clip_audio=False,
         same_output_threshold=10,
         transcription_callback=None,
-        enable_translation=False,
-        target_language="fr",
+        enable_translation=True,
+        target_language="en",
         translation_callback=None,
         translation_srt_file_path="./output_translated.srt",
     ):

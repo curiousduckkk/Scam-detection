@@ -1,2 +1,4 @@
-*/__pycache__/*
-./output.srt
+**/__pycache__/
+output.srt
+output_translated.srt
+translated.srt
