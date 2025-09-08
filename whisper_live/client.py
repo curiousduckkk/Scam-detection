@@ -362,7 +362,7 @@ class TranscriptionTeeClient:
         self.channels = 1
         self.rate = 16000
         self.record_seconds = 60000
-        self.save_output_recording = save_output_recording
+        self.save_output_recording = False
         self.output_recording_filename = output_recording_filename
         self.mute_audio_playback = mute_audio_playback
         self.frames = b""
@@ -812,8 +812,8 @@ class TranscriptionClient(TranscriptionTeeClient):
             translation_srt_file_path=translation_srt_file_path,
         )
 
-        if save_output_recording and not output_recording_filename.endswith(".wav"):
-            raise ValueError(f"Please provide a valid `output_recording_filename`: {output_recording_filename}")
+        # if save_output_recording and not (output_recording_filename.endswith(".wav")):
+        #     raise ValueError(f"Please provide a valid `output_recording_filename`: {output_recording_filename}")
         if not output_transcription_path.endswith(".srt"):
             raise ValueError(f"Please provide a valid `output_transcription_path`: {output_transcription_path}. The file extension should be `.srt`.")
         if not translation_srt_file_path.endswith(".srt"):
