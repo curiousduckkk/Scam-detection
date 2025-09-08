@@ -43,8 +43,8 @@ if __name__ == '__main__':
                           help='Save the output recording, only used for microphone input.')
     parser.add_argument('--enable_translation',
                           action='store_true',
-                          default='true',
-                          help='Enable translation of the transcription output.')
+                          default='false',
+                          help='Enable real translation')
     parser.add_argument('--target_language', '-tl',
                           type=str,
                           default='hi',
@@ -52,7 +52,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    # transcription_client = TranscriptionClient(host="localhost", port=9090, translate=True, save_output_recording=True, output_recording_filename="./output_recording.wav")
+    # transcription_client = TranscriptionClient(host="localhost", port=9090, translate=True, enable_translation=False, output_recording_filename="./output_recording.wav")
     # transcription_client()
     # Validate audio files
     valid_files = []

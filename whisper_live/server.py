@@ -26,6 +26,7 @@ class ClientManager:
             max_connection_time (int, optional): The maximum duration (in seconds) a client can stay connected. Defaults
                                                  to 600 seconds (10 minutes).
         """
+        # print("I am in server.py ClientManager init")
         self.clients = {}
         self.start_times = {}
         self.max_clients = max_clients
@@ -41,6 +42,7 @@ class ClientManager:
         """
         self.clients[websocket] = client
         self.start_times[websocket] = time.time()
+        # print("I am in server.py ClientManager add_client")
 
     def get_client(self, websocket):
         """
@@ -52,6 +54,7 @@ class ClientManager:
         Returns:
             The client object if found, False otherwise.
         """
+        # print("I am in server.py ClientManager get_client")
         if websocket in self.clients:
             return self.clients[websocket]
         return False
@@ -64,6 +67,7 @@ class ClientManager:
         Args:
             websocket: The websocket associated with the client to be removed.
         """
+        # print("I am in server.py ClientManager remove_client")
         client = self.clients.pop(websocket, None)
         if client:
             client.cleanup()
@@ -77,6 +81,7 @@ class ClientManager:
             The estimated wait time in minutes for new clients to connect. Returns 0 if there are available slots.
         """
         wait_time = None
+        # print("I am in server.py ClientManager get_Wait_time")
         for start_time in self.start_times.values():
             current_client_time_remaining = self.max_connection_time - (time.time() - start_time)
             if wait_time is None or current_client_time_remaining < wait_time:
@@ -146,6 +151,7 @@ class TranscriptionServer:
     RATE = 16000
 
     def __init__(self):
+        # print("I am in server.py TranscriptionServer init")
         self.client_manager = None
         self.no_voice_activity_chunks = 0
         self.use_vad = True
@@ -156,7 +162,7 @@ class TranscriptionServer:
         whisper_tensorrt_path, trt_multilingual, trt_py_session=False,
     ):
         client: Optional[ServeClientBase] = None
-
+        # print("I am in server.py TranscriptionServer initialize_client")
         # Check if client wants translation
         enable_translation = options.get("enable_translation", False)
         
@@ -185,62 +191,6 @@ class TranscriptionServer:
             translation_thread.start()
             
             logging.info(f"Translation enabled for client {options['uid']} with target language: {target_language}")
-
-        if self.backend.is_tensorrt():
-            try:
-                from whisper_live.backend.trt_backend import ServeClientTensorRT
-                client = ServeClientTensorRT(
-                    websocket,
-                    multilingual=trt_multilingual,
-                    language=options["language"],
-                    task=options["task"],
-                    client_uid=options["uid"],
-                    model=whisper_tensorrt_path,
-                    single_model=self.single_model,
-                    use_py_session=trt_py_session,
-                    send_last_n_segments=options.get("send_last_n_segments", 10),
-                    no_speech_thresh=options.get("no_speech_thresh", 0.45),
-                    clip_audio=options.get("clip_audio", False),
-                    same_output_threshold=options.get("same_output_threshold", 10),
-                )
-                logging.info("Running TensorRT backend.")
-            except Exception as e:
-                logging.error(f"TensorRT-LLM not supported: {e}")
-                self.client_uid = options["uid"]
-                websocket.send(json.dumps({
-                    "uid": self.client_uid,
-                    "status": "WARNING",
-                    "message": "TensorRT-LLM not supported on Server yet. "
-                               "Reverting to available backend: 'faster_whisper'"
-                }))
-                self.backend = BackendType.FASTER_WHISPER
-        
-        if self.backend.is_openvino():
-            try:
-                from whisper_live.backend.openvino_backend import ServeClientOpenVINO
-                client = ServeClientOpenVINO(
-                    websocket,
-                    language=options["language"],
-                    task=options["task"],
-                    client_uid=options["uid"],
-                    model=options["model"],
-                    single_model=self.single_model,
-                    send_last_n_segments=options.get("send_last_n_segments", 10),
-                    no_speech_thresh=options.get("no_speech_thresh", 0.45),
-                    clip_audio=options.get("clip_audio", False),
-                    same_output_threshold=options.get("same_output_threshold", 10),
-                )
-                logging.info("Running OpenVINO backend.")
-            except Exception as e:
-                logging.error(f"OpenVINO not supported: {e}")
-                self.backend = BackendType.FASTER_WHISPER
-                self.client_uid = options["uid"]
-                websocket.send(json.dumps({
-                    "uid": self.client_uid,
-                    "status": "WARNING",
-                    "message": "OpenVINO not supported on Server yet. "
-                                "Reverting to available backend: 'faster_whisper'"
-                }))
 
         try:
             if self.backend.is_faster_whisper():
@@ -291,6 +241,7 @@ class TranscriptionServer:
         Returns:
             A numpy array containing the audio.
         """
+        # print("I am in server.py TranscriptionServer get_audio_from_websocket")
         frame_data = websocket.recv()
         if frame_data == b"END_OF_AUDIO":
             return False
@@ -298,6 +249,7 @@ class TranscriptionServer:
 
     def handle_new_connection(self, websocket, faster_whisper_custom_model_path,
                               whisper_tensorrt_path, trt_multilingual, trt_py_session=False):
+        # print("I am in server.py TranscriptionServer handle_new_connection")
         try:
             logging.info("New client connected")
             options = websocket.recv()
@@ -324,6 +276,7 @@ class TranscriptionServer:
             return False
 
     def process_audio_frames(self, websocket):
+        # print("I am in server.py TranscriptionServer process_audio_frames")
         frame_np = self.get_audio_from_websocket(websocket)
         client = self.client_manager.get_client(websocket)
         if frame_np is False:
@@ -373,6 +326,7 @@ class TranscriptionServer:
         Raises:
             Exception: If there is an error during the audio frame processing.
         """
+        # print("I am in server.py TranscriptionServer recv_audio")
         self.backend = backend
         if not self.handle_new_connection(websocket, faster_whisper_custom_model_path,
                                           whisper_tensorrt_path, trt_multilingual, trt_py_session=trt_py_session):
@@ -411,6 +365,7 @@ class TranscriptionServer:
             host (str): The host address to bind the server.
             port (int): The port number to bind the server.
         """
+        # print("I am in server.py TranscriptionServer run")
         self.cache_path = cache_path
         self.client_manager = ClientManager(max_clients, max_connection_time)
         if faster_whisper_custom_model_path is not None and not os.path.exists(faster_whisper_custom_model_path):
@@ -441,6 +396,7 @@ class TranscriptionServer:
             server.serve_forever()
 
     def voice_activity(self, websocket, frame_np):
+        # print("I am in server.py TranscriptionServer voice_activity")
         """
         Evaluates the voice activity in a given audio frame and manages the state of voice activity detection.
 
@@ -477,6 +433,7 @@ class TranscriptionServer:
         Args:
             websocket: The websocket associated with the client to be cleaned up.
         """
+        # print("I am in server.py TranscriptionServer cleanup")
         client = self.client_manager.get_client(websocket)
         if client:
             if hasattr(client, 'translation_client') and client.translation_client:

@@ -771,7 +771,7 @@ class TranscriptionClient(TranscriptionTeeClient):
         self,
         host,
         port,
-        lang="hi",
+        lang=None,
         translate=False,
         model="small",
         use_vad=True,

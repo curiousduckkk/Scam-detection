@@ -141,7 +141,7 @@ class LiveTranscriber:
             else:
                 segments, info = self.model.transcribe(
                     audio_chunk, 
-                    language="hi",  # Change this to your source language
+                    language=None,  # Change this to your source language
                     task="transcribe",
                     vad_filter=True,
                     vad_parameters=dict(
