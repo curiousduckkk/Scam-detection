@@ -626,43 +626,58 @@ class TranscriptionTeeClient:
 
     def record(self):
         """
-        Record audio data from the input stream and save it to a WAV file.
+        Record audio data from the arecord subprocess and send it to the server.
 
-        Continuously records audio data from the input stream, sends it to the server via a WebSocket
-        connection, and simultaneously saves it to multiple WAV files in chunks. It stops recording when
-        the `RECORD_SECONDS` duration is reached or when the `RECORDING` flag is set to `False`.
-
-        Audio data is saved in chunks to the "chunks" directory. Each chunk is saved as a separate WAV file.
-        The recording will continue until the specified duration is reached or until the `RECORDING` flag is set to `False`.
-        The recording process can be interrupted by sending a KeyboardInterrupt (e.g., pressing Ctrl+C). After recording,
-        the method combines all the saved audio chunks into the specified `out_file`.
+        Continuously reads raw audio from arecord, sends it to all clients, and saves it
+        in chunks if save_output_recording is True. Stops recording when any client stops
+        recording or on KeyboardInterrupt.
         """
         n_audio_file = 0
         if self.save_output_recording:
             if os.path.exists("chunks"):
                 shutil.rmtree("chunks")
             os.makedirs("chunks")
+
+        if self.arecord_process is None:
+            print("[ERROR]: arecord subprocess not running.")
+            return
+
         try:
-            for _ in range(0, int(self.rate / self.chunk * self.record_seconds)):
-                if not any(client.recording for client in self.clients):
-                    break
-                data = self.stream.read(self.chunk, exception_on_overflow=False)
+            while any(client.recording for client in self.clients):
+                data = self.arecord_process.stdout.read(self.chunk)
+                if not data:
+                    break  # EOF
+
                 self.frames += data
 
                 audio_array = self.bytes_to_float_array(data)
-
                 self.multicast_packet(audio_array.tobytes())
 
-                # save frames if more than a minute
-                if len(self.frames) > 60 * self.rate:
+                # Save frames if longer than 1 minute
+                if len(self.frames) > 60 * self.rate * 2:  # 2 bytes per sample
                     if self.save_output_recording:
                         self.save_chunk(n_audio_file)
                         n_audio_file += 1
                     self.frames = b""
+
+            # Save any remaining frames
+            if self.save_output_recording and len(self.frames):
+                self.save_chunk(n_audio_file)
+                n_audio_file += 1
+                self.frames = b""
+
             self.write_all_clients_srt()
 
+            # Terminate arecord subprocess
+            self.arecord_process.terminate()
+            self.arecord_process.wait()
+
         except KeyboardInterrupt:
-            self.finalize_recording(n_audio_file)
+            print("[INFO]: Keyboard interrupt. Stopping recording.")
+            if self.arecord_process:
+                self.arecord_process.terminate()
+                self.arecord_process.wait()
+            self.write_all_clients_srt()
 
     def write_audio_frames_to_file(self, frames, file_name):
         """
