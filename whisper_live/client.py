@@ -632,6 +632,8 @@ class TranscriptionTeeClient:
         in chunks if save_output_recording is True. Stops recording when any client stops
         recording or on KeyboardInterrupt.
         """
+        import audioop  # for RMS calculation
+
         n_audio_file = 0
         if self.save_output_recording:
             if os.path.exists("chunks"):
@@ -649,6 +651,8 @@ class TranscriptionTeeClient:
                     break  # EOF
 
                 self.frames += data
+                rms = audioop.rms(data, 2)  # 2 bytes per sample
+                print(f"[INFO] Receiving audio... RMS: {rms}", end="\r")
 
                 audio_array = self.bytes_to_float_array(data)
                 self.multicast_packet(audio_array.tobytes())
@@ -673,11 +677,12 @@ class TranscriptionTeeClient:
             self.arecord_process.wait()
 
         except KeyboardInterrupt:
-            print("[INFO]: Keyboard interrupt. Stopping recording.")
+            print("\n[INFO]: Keyboard interrupt. Stopping recording.")
             if self.arecord_process:
                 self.arecord_process.terminate()
                 self.arecord_process.wait()
             self.write_all_clients_srt()
+
 
     def write_audio_frames_to_file(self, frames, file_name):
         """
