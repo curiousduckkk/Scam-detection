@@ -1,7 +1,7 @@
 import os
 import shutil
 import wave
-
+import subprocess
 import logging
 import numpy as np
 import pyaudio
@@ -353,31 +353,44 @@ class TranscriptionTeeClient:
     Attributes:
         clients (list): the underlying Client instances responsible for handling WebSocket connections.
     """
-    def __init__(self, clients, save_output_recording=False, output_recording_filename="./output_recording.wav", mute_audio_playback=False):
+    def __init__(self, clients, save_output_recording=False, output_recording_filename="./output_recording.wav", mute_audio_playback=False, alsa_device=None):
         self.clients = clients
         if not self.clients:
             raise Exception("At least one client is required.")
+
         self.chunk = 4096
-        self.format = pyaudio.paInt16
         self.channels = 1
         self.rate = 16000
         self.record_seconds = 60000
-        self.save_output_recording = False
+        self.save_output_recording = save_output_recording
         self.output_recording_filename = output_recording_filename
         self.mute_audio_playback = mute_audio_playback
         self.frames = b""
-        self.p = pyaudio.PyAudio()
+        self.alsa_device = alsa_device
+        self.recording = False
+
+        # Prepare arecord subprocess instead of PyAudio
         try:
-            self.stream = self.p.open(
-                format=self.format,
-                channels=self.channels,
-                rate=self.rate,
-                input=True,
-                frames_per_buffer=self.chunk,
+            cmd = [
+                "arecord",
+                "-f", "S16_LE",
+                "-r", str(self.rate),
+                "-c", str(self.channels),
+                "-t", "raw"
+            ]
+            if self.alsa_device:
+                cmd += ["-D", self.alsa_device]
+
+            self.arecord_process = subprocess.Popen(
+                ["arecord", "-f", "S16_LE", "-r", str(self.rate), "-c", str(self.channels), "-t", "raw", "-q"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
             )
-        except OSError as error:
-            print(f"[WARN]: Unable to access microphone. {error}")
-            self.stream = None
+            print("[INFO]: arecord subprocess started for live audio capture.")
+        except Exception as e:
+            print(f"[ERROR]: Unable to start arecord subprocess. {e}")
+            self.arecord_process = None
+
 
     def __call__(self, audio=None, rtsp_url=None, hls_url=None, save_file=None):
         """
@@ -615,43 +628,63 @@ class TranscriptionTeeClient:
 
     def record(self):
         """
-        Record audio data from the input stream and save it to a WAV file.
+        Record audio data from the arecord subprocess and send it to the server.
 
-        Continuously records audio data from the input stream, sends it to the server via a WebSocket
-        connection, and simultaneously saves it to multiple WAV files in chunks. It stops recording when
-        the `RECORD_SECONDS` duration is reached or when the `RECORDING` flag is set to `False`.
-
-        Audio data is saved in chunks to the "chunks" directory. Each chunk is saved as a separate WAV file.
-        The recording will continue until the specified duration is reached or until the `RECORDING` flag is set to `False`.
-        The recording process can be interrupted by sending a KeyboardInterrupt (e.g., pressing Ctrl+C). After recording,
-        the method combines all the saved audio chunks into the specified `out_file`.
+        Continuously reads raw audio from arecord, sends it to all clients, and saves it
+        in chunks if save_output_recording is True. Stops recording when any client stops
+        recording or on KeyboardInterrupt.
         """
+        import audioop  # for RMS calculation
+
         n_audio_file = 0
         if self.save_output_recording:
             if os.path.exists("chunks"):
                 shutil.rmtree("chunks")
             os.makedirs("chunks")
+
+        if self.arecord_process is None:
+            print("[ERROR]: arecord subprocess not running.")
+            return
+
         try:
-            for _ in range(0, int(self.rate / self.chunk * self.record_seconds)):
-                if not any(client.recording for client in self.clients):
-                    break
-                data = self.stream.read(self.chunk, exception_on_overflow=False)
+            while any(client.recording for client in self.clients):
+                data = self.arecord_process.stdout.read(self.chunk)
+                if not data:
+                    break  # EOF
+
                 self.frames += data
+                rms = audioop.rms(data, 2)  # 2 bytes per sample
+                print(f"[INFO] Receiving audio... RMS: {rms}", end="\r")
 
                 audio_array = self.bytes_to_float_array(data)
-
                 self.multicast_packet(audio_array.tobytes())
 
-                # save frames if more than a minute
-                if len(self.frames) > 60 * self.rate:
+                # Save frames if longer than 1 minute
+                if len(self.frames) > 60 * self.rate * 2:  # 2 bytes per sample
                     if self.save_output_recording:
                         self.save_chunk(n_audio_file)
                         n_audio_file += 1
                     self.frames = b""
+
+            # Save any remaining frames
+            if self.save_output_recording and len(self.frames):
+                self.save_chunk(n_audio_file)
+                n_audio_file += 1
+                self.frames = b""
+
             self.write_all_clients_srt()
 
+            # Terminate arecord subprocess
+            self.arecord_process.terminate()
+            self.arecord_process.wait()
+
         except KeyboardInterrupt:
-            self.finalize_recording(n_audio_file)
+            print("\n[INFO]: Keyboard interrupt. Stopping recording.")
+            if self.arecord_process:
+                self.arecord_process.terminate()
+                self.arecord_process.wait()
+            self.write_all_clients_srt()
+
 
     def write_audio_frames_to_file(self, frames, file_name):
         """
