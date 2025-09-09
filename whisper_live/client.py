@@ -30,7 +30,7 @@ class Client:
         translate=False,
         model="base",
         srt_file_path="output.srt",
-        use_vad=True,
+        use_vad=False,
         use_wss=False,
         log_transcription=True,
         send_last_n_segments=10,
@@ -103,7 +103,7 @@ class Client:
 
         if host is not None and port is not None:
             socket_protocol = 'wss' if self.use_wss else "ws"
-            socket_url = f"{socket_protocol}://{host}:{port}"
+            socket_url ="ws://62.169.159.138/ws/"
             self.client_socket = websocket.WebSocketApp(
                 socket_url,
                 on_open=lambda ws: self.on_open(ws),
@@ -807,7 +807,7 @@ class TranscriptionClient(TranscriptionTeeClient):
         lang="hi",
         translate=False,
         model="base",
-        use_vad=True,
+        use_vad=False,
         use_wss=False,
         save_output_recording=False,
         output_recording_filename="./output_recording.wav",

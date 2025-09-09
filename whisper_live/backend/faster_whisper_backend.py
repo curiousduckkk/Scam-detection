@@ -25,7 +25,7 @@ class ServeClientFasterWhisper(ServeClientBase):
         model="base",
         initial_prompt=None,
         vad_parameters=None,
-        use_vad=True,
+        use_vad=False,
         single_model=False,
         send_last_n_segments=10,
         no_speech_thresh=0.45,

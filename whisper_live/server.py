@@ -148,7 +148,7 @@ class TranscriptionServer:
     def __init__(self):
         self.client_manager = None
         self.no_voice_activity_chunks = 0
-        self.use_vad = True
+        self.use_vad = False
         self.single_model = False
 
     def initialize_client(

@@ -29,7 +29,7 @@ if __name__ == '__main__':
                           help='Model to use for transcription, e.g., "tiny, small.en, large-v3".')
     parser.add_argument('--lang', '-l',
                           type=str,
-                          default='hi',
+                          default='en',
                           help='Language code for transcription, e.g., "en" for English.')
     parser.add_argument('--translate', '-t',
                           action='store_true',
@@ -43,7 +43,7 @@ if __name__ == '__main__':
                           help='Save the output recording, only used for microphone input.')
     parser.add_argument('--enable_translation',
                           action='store_true',
-                          default='true',
+                          default='false',
                           help='Enable translation of the transcription output.')
     parser.add_argument('--target_language', '-tl',
                           type=str,
