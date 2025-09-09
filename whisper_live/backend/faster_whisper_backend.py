@@ -22,7 +22,7 @@ class ServeClientFasterWhisper(ServeClientBase):
         device=None,
         language=None,
         client_uid=None,
-        model="small.en",
+        model="turbo",
         initial_prompt=None,
         vad_parameters=None,
         use_vad=True,
