@@ -52,7 +52,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    transcription_client = TranscriptionClient(host="localhost", port=9090, translate=True, enable_translation=False, output_recording_filename="./output_recording.wav")
+    transcription_client = TranscriptionClient(host="localhost", port=9090, translate=True, enable_translation=True, output_recording_filename="./output_recording.wav")
     transcription_client()
     # Validate audio files
     # valid_files = []
