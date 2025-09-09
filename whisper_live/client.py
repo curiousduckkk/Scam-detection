@@ -383,7 +383,9 @@ class TranscriptionTeeClient:
                 cmd += ["-D", self.alsa_device]
 
             self.arecord_process = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0
+                ["arecord", "-f", "S16_LE", "-r", str(self.rate), "-c", str(self.channels), "-t", "raw", "-q"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
             )
             print("[INFO]: arecord subprocess started for live audio capture.")
         except Exception as e:
