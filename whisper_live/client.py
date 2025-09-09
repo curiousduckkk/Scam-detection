@@ -10,6 +10,7 @@ import json
 import websocket
 import uuid
 import time
+import subprocess
 import av
 import utils as utils
 
@@ -353,12 +354,12 @@ class TranscriptionTeeClient:
     Attributes:
         clients (list): the underlying Client instances responsible for handling WebSocket connections.
     """
-    def __init__(self, clients, save_output_recording=False, output_recording_filename="./output_recording.wav", mute_audio_playback=False):
+    def __init__(self, clients, save_output_recording=False, output_recording_filename="./output_recording.wav", mute_audio_playback=False, alsa_device=None):
         self.clients = clients
         if not self.clients:
             raise Exception("At least one client is required.")
+
         self.chunk = 4096
-        self.format = pyaudio.paInt16
         self.channels = 1
         self.rate = 16000
         self.record_seconds = 60000
@@ -366,18 +367,28 @@ class TranscriptionTeeClient:
         self.output_recording_filename = output_recording_filename
         self.mute_audio_playback = mute_audio_playback
         self.frames = b""
-        self.p = pyaudio.PyAudio()
+        self.alsa_device = alsa_device
+        self.recording = False
+
+        # Prepare arecord subprocess instead of PyAudio
         try:
-            self.stream = self.p.open(
-                format=self.format,
-                channels=self.channels,
-                rate=self.rate,
-                input=True,
-                frames_per_buffer=self.chunk,
+            cmd = [
+                "arecord",
+                "-f", "S16_LE",
+                "-r", str(self.rate),
+                "-c", str(self.channels),
+                "-t", "raw"
+            ]
+            if self.alsa_device:
+                cmd += ["-D", self.alsa_device]
+
+            self.arecord_process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0
             )
-        except OSError as error:
-            print(f"[WARN]: Unable to access microphone. {error}")
-            self.stream = None
+            print("[INFO]: arecord subprocess started for live audio capture.")
+        except Exception as e:
+            print(f"[ERROR]: Unable to start arecord subprocess. {e}")
+            self.arecord_process = None
 
     def __call__(self, audio=None, rtsp_url=None, hls_url=None, save_file=None):
         """
