@@ -74,7 +74,7 @@ class RealtimeClient:
                         input=True,
                         frames_per_buffer=CHUNK
                     )
-                else:  # arecord
+                elif self.source == "arecord":
                     self.arecord_process = subprocess.Popen(
                         ["arecord", "-f", "S16_LE", "-r", str(RATE), "-c", "1", "-t", "raw"],
                         stdout=subprocess.PIPE,
@@ -132,7 +132,7 @@ class RealtimeClient:
             while True:
                 if self.source == "mic":
                     audio_data = self.input_stream.read(CHUNK, exception_on_overflow=False)
-                else:  # arecord
+                elif self.source == "arecord":
                     audio_data = self.arecord_process.stdout.read(CHUNK * 2)
                     if not audio_data:
                         break
@@ -213,7 +213,8 @@ async def call_start(event: CallStartEvent):
     global realtime_client
     instructions = SYSTEM_INSTRUCTIONS + f"\n\nThe caller {event.phone_number} is {'known' if event.exists_in_contacts else 'unknown'} to the user."
     if realtime_client is None:
-        realtime_client = RealtimeClient(source="mic", instructions=instructions)
+        # Respect the original source flag passed at startup
+        realtime_client = RealtimeClient(source=args.source, instructions=instructions)
         asyncio.create_task(realtime_client.start())
         return {"status": "Realtime scam detection started"}
     else:
@@ -230,9 +231,10 @@ async def call_end(event: CallEndEvent):
         return {"status": f"Call ended, duration {event.duration}s, realtime client cleaned up"}
     return {"status": "No active call to end"}
 
-# ---------------- Run FastAPI ----------------
+# ---------------- Run FastAPI with --source flag ----------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--source", choices=["mic", "arecord"], default="mic", help="Audio input source")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
