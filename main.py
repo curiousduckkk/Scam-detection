@@ -123,7 +123,7 @@ class RealtimeClient:
             }
         }
         await self.ws.send(json.dumps(session_update))
-        print("Session configured with system instructions")
+        print(f"Session configured with system instructions {self.SYSTEM_INSTRUCTIONS}")
 
     async def send_audio(self):
         """Capture and send audio"""
@@ -198,6 +198,14 @@ class RealtimeClient:
 app = FastAPI()
 realtime_client: RealtimeClient = None
 
+# ✅ Always parse args so APP_CONFIG is set, even under uvicorn
+parser = argparse.ArgumentParser()
+parser.add_argument("--source", choices=["mic", "arecord"], default="mic", help="Audio input source")
+parser.add_argument("--host", default="0.0.0.0")
+parser.add_argument("--port", type=int, default=8000)
+args, _ = parser.parse_known_args()
+APP_CONFIG = args  # <--- now never None
+
 class CallStartEvent(BaseModel):
     call_id: str
     phone_number: str
@@ -210,11 +218,10 @@ class CallEndEvent(BaseModel):
 
 @app.post("/call/start")
 async def call_start(event: CallStartEvent):
-    global realtime_client
+    global realtime_client, APP_CONFIG
     instructions = SYSTEM_INSTRUCTIONS + f"\n\nThe caller {event.phone_number} is {'known' if event.exists_in_contacts else 'unknown'} to the user."
     if realtime_client is None:
-        # Respect the original source flag passed at startup
-        realtime_client = RealtimeClient(source=args.source, instructions=instructions)
+        realtime_client = RealtimeClient(source=APP_CONFIG.source, instructions=instructions)
         asyncio.create_task(realtime_client.start())
         return {"status": "Realtime scam detection started"}
     else:
@@ -231,12 +238,6 @@ async def call_end(event: CallEndEvent):
         return {"status": f"Call ended, duration {event.duration}s, realtime client cleaned up"}
     return {"status": "No active call to end"}
 
-# ---------------- Run FastAPI with --source flag ----------------
+# ---------------- Run FastAPI ----------------
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--source", choices=["mic", "arecord"], default="mic", help="Audio input source")
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8000)
-    args = parser.parse_args()
-
     uvicorn.run("main:app", host=args.host, port=args.port, reload=True)
