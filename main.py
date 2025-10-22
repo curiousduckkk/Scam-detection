@@ -219,7 +219,7 @@ class CallEndEvent(BaseModel):
 @app.post("/call/start")
 async def call_start(event: CallStartEvent):
     global realtime_client, APP_CONFIG
-    instructions = SYSTEM_INSTRUCTIONS + f"\n\nThe caller {event.phone_number} is {'known' if event.exists_in_contacts else 'unknown'} to the user."
+    instructions = SYSTEM_INSTRUCTIONS + f"\n\nThe caller {event.phone_number} is {'known' if event.exists_in_contacts else 'unknown'} to the user, keep this in context."
     if realtime_client is None:
         realtime_client = RealtimeClient(source=APP_CONFIG.source, instructions=instructions)
         asyncio.create_task(realtime_client.start())
