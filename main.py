@@ -350,6 +350,7 @@ class CallEndEvent(BaseModel):
 
 @app.post("/call/start")
 async def call_start(event: CallStartEvent):
+    print("/call/start body: ", event.dict())
     global realtime_client, APP_CONFIG
     await save_call_data(
                             user_uuid=user_uuid,
@@ -376,6 +377,7 @@ async def call_start(event: CallStartEvent):
 
 @app.post("/call/end")
 async def call_end(event: CallEndEvent):
+    print("/call/end body: ", event.dict())
     global realtime_client
     if realtime_client:
         await realtime_client.close_ws()
