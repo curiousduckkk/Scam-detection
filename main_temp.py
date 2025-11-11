@@ -10,27 +10,13 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from pydantic import BaseModel
 import uvicorn
-import json
-from datetime import datetime
-import firebase_admin
-from firebase_admin import messaging, credentials
-import asyncio
-from db import save_call_data
 
-user_uuid = "user-1234"
+# ---------------- Load .env ----------------
 load_dotenv()
-
-with open('other/config.json', 'r') as f:
-    config = json.load(f)
-
-cred = credentials.Certificate(config['service_account_key'])
-if not firebase_admin._apps:
-    firebase_admin.initialize_app(cred)
-
-
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 URI = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
 
+# Audio configuration
 CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
@@ -53,41 +39,7 @@ Do not explain or say anything else, just respond with "Not a Scam", "Possible S
 When you detect concerning patterns, update your assessment as per the conversation proceeds.
 Your goal is to help the user recognize deceptive tactics and make informed decisions to protect themselves."""
 
-def get_scam_category(score):
-    """Determine scam category based on score"""
-    if 1 <= score <= 3:
-        return {
-            "category": "Not a Scam",
-            "emoji": "✅",
-            "color": "#4CAF50",  #green
-            "priority": "default",
-            "vibration": [100, 100]
-        }
-    elif 4 <= score <= 7:
-        return {
-            "category": "Possible Scam",
-            "emoji": "⚠",
-            "color": "#FFC107",  #yellow
-            "priority": "high",
-            "vibration": [200, 200, 200, 200]
-        }
-    elif 8 <= score <= 10:
-        return {
-            "category": "Definitely Scam",
-            "emoji": "🚨",
-            "color": "#F44336",  #red
-            "priority": "max",
-            "vibration": [500, 200, 500, 200, 500]
-        }
-    else:
-        return {
-            "category": "Unknown",
-            "emoji": "❓",
-            "color": "#9E9E9E",  #gray
-            "priority": "default",
-            "vibration": [100, 100]
-        }
-
+# ---------------- Realtime Client ----------------
 class RealtimeClient:
     def __init__(self, source="mic", instructions=SYSTEM_INSTRUCTIONS):
         self.source = source
@@ -113,6 +65,7 @@ class RealtimeClient:
                 self.ws = ws
                 print("Connected to OpenAI Realtime API")
 
+                # Initialize audio streams
                 if self.source == "mic":
                     self.input_stream = self.audio.open(
                         format=FORMAT,
@@ -136,8 +89,10 @@ class RealtimeClient:
                     frames_per_buffer=CHUNK
                 )
 
+                # Configure session
                 await self.configure_session()
 
+                # Start concurrent tasks
                 await asyncio.gather(
                     self.send_audio(),
                     self.receive_messages()
@@ -148,66 +103,6 @@ class RealtimeClient:
             await self.close_ws()
             self.cleanup()
 
-    async def send_notification(self, phone_number, scam_score, response_text):
-        """
-        Send scam alert notification to Android device
-
-        Args:
-            phone_number: Phone number that called
-            scam_score: Scam score (1-10)
-            response_text: Description of the scam
-        """
-
-        category_info = get_scam_category(scam_score)
-
-        title = f"{category_info['emoji']} {category_info['category']}"
-
-        body = f"{response_text}\nScore: {scam_score}/10"
-
-        message = messaging.Message(
-            notification=messaging.Notification(
-                title=title,
-                body=body
-            ),
-            data={
-                "phone_number": phone_number,
-                "scam_score": str(scam_score),
-                "response": response_text,
-                "category": category_info['category'],
-                "timestamp": datetime.now().isoformat()
-            },
-            token=self.fcm_token,
-            android=messaging.AndroidConfig(
-                priority='high',
-                notification=messaging.AndroidNotification(
-                    sound='default',
-                    priority=category_info['priority'],
-                    channel_id='scam_alerts',
-                    color=category_info['color'],
-                    icon='ic_dialog_alert',
-                    default_sound=True,
-                    default_vibrate_timings=False,
-                    vibrate_timings_millis=category_info['vibration'],
-                    visibility='public',
-                    notification_count=1
-                )
-            )
-        )
-
-        try:
-            response = messaging.send(message)
-            print(f"✓ Successfully sent notification")
-            print(f"  Category: {category_info['category']}")
-            print(f"  Message ID: {response}")
-            print(f"  Phone: {phone_number}")
-            print(f"  Score: {scam_score}/10")
-            print(f"  Color: {category_info['color']}")
-            return True
-        except Exception as e:
-            print(f"✗ Error sending notification: {e}")
-            return False
-        
-        
     async def configure_session(self):
         """Configure the session settings"""
         session_update = {
@@ -263,21 +158,6 @@ class RealtimeClient:
                 elif event_type == "response.audio_transcript.done":
                     transcript = event.get("transcript", "")
                     print(f"Assistant: {transcript}\n")
-                    try:
-                        data = json.loads(transcript)
-                        if "response" in data and "score" in data:
-                            response_text = data["response"]
-                            scam_score = int(data["score"])
-                            await save_call_data(
-                                user_uuid=user_uuid,
-                                scam_score=scam_score,
-                                other_person_phone=event.get("phone_number", "unknown"),
-                                call_id=event.get("call_id", "unknown")
-                            )                                                   
-                        if scam_score > 4:
-                            await self.send_notification(event.get("phone_number", "unknown"), scam_score, response_text)
-                    except json.JSONDecodeError:
-                        pass
 
                 elif event_type == "response.audio.delta":
                     audio_base64 = event.get("delta", "")
@@ -314,22 +194,23 @@ class RealtimeClient:
         self.audio.terminate()
         print("Audio resources cleaned up")
 
+# ---------------- FastAPI Integration ----------------
 app = FastAPI()
 realtime_client: RealtimeClient = None
 
+# ✅ Always parse args so APP_CONFIG is set, even under uvicorn
 parser = argparse.ArgumentParser()
 parser.add_argument("--source", choices=["mic", "arecord"], default="mic", help="Audio input source")
 parser.add_argument("--host", default="0.0.0.0")
 parser.add_argument("--port", type=int, default=8000)
 args, _ = parser.parse_known_args()
-APP_CONFIG = args
+APP_CONFIG = args  # <--- now never None
 
 class CallStartEvent(BaseModel):
     call_id: str
     phone_number: str
     incoming: bool
     exists_in_contacts: bool
-    fcm_token: str
 
 class CallEndEvent(BaseModel):
     call_id: str
@@ -337,32 +218,20 @@ class CallEndEvent(BaseModel):
 
 @app.post("/call/start")
 async def call_start(event: CallStartEvent):
+    print("/call/start body: ", event.dict())
     global realtime_client, APP_CONFIG
-    await save_call_data(
-                            user_uuid=user_uuid,
-                            scam_score=5,
-                            other_person_phone="1234567890",
-                            call_id="0987654321"
-                        )   
     instructions = SYSTEM_INSTRUCTIONS + f"\n\nThe caller {event.phone_number} is {'known' if event.exists_in_contacts else 'unknown'} to the user, keep this in context."
     if realtime_client is None:
         realtime_client = RealtimeClient(source=APP_CONFIG.source, instructions=instructions)
-
-        realtime_client.phone_number = event.phone_number
-        realtime_client.fcm_token = event.fcm_token
-
         asyncio.create_task(realtime_client.start())
         return {"status": "Realtime scam detection started"}
     else:
         realtime_client.SYSTEM_INSTRUCTIONS = instructions
-
-        realtime_client.phone_number = event.phone_number
-        realtime_client.fcm_token = event.fcm_token
-
         return {"status": "Realtime client already running, instructions updated"}
 
 @app.post("/call/end")
 async def call_end(event: CallEndEvent):
+    print("/call/end body: ", event.dict())
     global realtime_client
     if realtime_client:
         await realtime_client.close_ws()
@@ -371,5 +240,6 @@ async def call_end(event: CallEndEvent):
         return {"status": f"Call ended, duration {event.duration}s, realtime client cleaned up"}
     return {"status": "No active call to end"}
 
+# ---------------- Run FastAPI ----------------
 if __name__ == "__main__":
-    uvicorn.run("main:app", host=args.host, port=8080, reload=True)
+    uvicorn.run("main:app", host=args.host, port=args.port, reload=True)
