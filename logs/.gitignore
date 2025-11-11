@@ -1,0 +1,5 @@
+# This directory contains application logs
+# Log files are created automatically when the application runs
+# See logger.py for configuration
+
+*.log

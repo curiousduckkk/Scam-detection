@@ -1,0 +1,4 @@
+{
+  "service_account_key": "scam-detection-firebase-sdk.json",
+  "comment": "This file contains Firebase configuration. Replace with your actual Firebase service account key path."
+}
