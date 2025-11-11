@@ -1,4 +1,7 @@
 **/__pycache__/
 output.srt
+project1-key.pem
+scam-detection-firebase-sdk.json
 output_translated.srt
 translated.srt
+.env
