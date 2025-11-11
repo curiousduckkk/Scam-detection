@@ -89,7 +89,7 @@ def get_scam_category(score):
         }
 
 class RealtimeClient:
-    def __init__(self, source="mic", instructions=SYSTEM_INSTRUCTIONS):
+    def __init__(self, source="mic", instructions=SYSTEM_INSTRUCTIONS, bluetooth_source=None):
         self.source = source
         self.audio = pyaudio.PyAudio()
         self.input_stream = None
@@ -97,6 +97,43 @@ class RealtimeClient:
         self.ws = None
         self.arecord_process = None
         self.SYSTEM_INSTRUCTIONS = instructions
+        self.phone_number = "unknown"
+        self.fcm_token = None
+        self.bluetooth_source = bluetooth_source or self.detect_bluetooth_source()
+
+    def detect_bluetooth_source(self):
+        """Detect the Bluetooth audio source for call audio"""
+        try:
+            result = subprocess.run(
+                ["pactl", "list", "sources", "short"],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            
+            # Look for Bluetooth source (usually contains 'bluez' or phone name)
+            for line in result.stdout.split('\n'):
+                if 'bluez' in line.lower() or 'bluetooth' in line.lower():
+                    # Extract source name (first column)
+                    source_name = line.split()[1] if len(line.split()) > 1 else None
+                    if source_name:
+                        print(f"✓ Detected Bluetooth source: {source_name}")
+                        return source_name
+            
+            # Fallback: look for any source that's not the built-in mic
+            lines = [l for l in result.stdout.split('\n') if l.strip() and 'monitor' not in l.lower()]
+            if len(lines) > 1:
+                # Use the second source (first is usually built-in mic)
+                source_name = lines[1].split()[1] if len(lines[1].split()) > 1 else None
+                if source_name:
+                    print(f"⚠ Using source: {source_name}")
+                    return source_name
+            
+            print("⚠ Could not detect Bluetooth source, using default")
+            return None
+        except Exception as e:
+            print(f"⚠ Error detecting Bluetooth source: {e}")
+            return None
 
     async def start(self):
         """Connect to OpenAI Realtime API"""
@@ -121,12 +158,95 @@ class RealtimeClient:
                         input=True,
                         frames_per_buffer=CHUNK
                     )
+                    print("✓ Started microphone capture")
+                    
                 elif self.source == "arecord":
+                    # Load echo cancellation module if available
+                    echo_source = None
+                    try:
+                        check_module = subprocess.run(
+                            ["pactl", "list", "modules", "short"],
+                            capture_output=True,
+                            text=True,
+                            timeout=2
+                        )
+                        
+                        if "module-echo-cancel" not in check_module.stdout:
+                            print("Loading echo cancellation module...")
+                            
+                            # Use Bluetooth source for echo cancellation
+                            source_param = f"source_master={self.bluetooth_source}" if self.bluetooth_source else ""
+                            
+                            load_cmd = [
+                                "pactl", "load-module", "module-echo-cancel",
+                                "aec_method=webrtc",
+                                "source_name=echocancel_phone",
+                                "sink_name=echocancel_phone_sink"
+                            ]
+                            if source_param:
+                                load_cmd.append(source_param)
+                            
+                            subprocess.run(load_cmd, timeout=2)
+                            await asyncio.sleep(0.5)
+                            echo_source = "echocancel_phone"
+                            print("✓ Echo cancellation enabled for phone audio")
+                        else:
+                            # Check if echocancel source exists
+                            sources = subprocess.run(
+                                ["pactl", "list", "sources", "short"],
+                                capture_output=True,
+                                text=True,
+                                timeout=2
+                            )
+                            if "echocancel_phone" in sources.stdout:
+                                echo_source = "echocancel_phone"
+                                print("✓ Using existing echo-cancelled phone source")
+                    except Exception as e:
+                        print(f"⚠ Could not load echo cancellation: {e}")
+                    
+                    # Determine which source to use (priority: echo-cancelled > bluetooth > default)
+                    audio_source = echo_source or self.bluetooth_source or "default"
+                    
+                    print(f"📞 Capturing audio from: {audio_source}")
+                    
+                    # Use arecord with the correct PulseAudio source
+                    arecord_cmd = [
+                        "arecord", 
+                        "-f", "S16_LE", 
+                        "-r", "24000", 
+                        "-c", "1", 
+                        "-t", "raw"
+                    ]
+                    
+                    # Add device parameter
+                    if audio_source == "default":
+                        arecord_cmd.extend(["-D", "pulse"])
+                    else:
+                        # Use pactl to record from specific source
+                        arecord_cmd = [
+                            "parec",
+                            "--rate=24000",
+                            "--channels=1",
+                            "--format=s16le",
+                            f"--device={audio_source}",
+                            "--raw"
+                        ]
+                    
                     self.arecord_process = subprocess.Popen(
-                        ["arecord", "-f", "S16_LE", "-r", str(RATE), "-c", "1", "-t", "raw"],
+                        arecord_cmd,
                         stdout=subprocess.PIPE,
-                        stderr=subprocess.DEVNULL
+                        stderr=subprocess.PIPE,
+                        bufsize=4096
                     )
+                    
+                    # Verify it started
+                    await asyncio.sleep(0.5)
+                    if self.arecord_process.poll() is not None:
+                        stderr_output = self.arecord_process.stderr.read().decode()
+                        print(f"❌ Audio capture failed: {stderr_output}")
+                        raise Exception("Audio capture failed to start")
+                    
+                    print(f"✓ Started capturing phone audio at 24000 Hz")
 
                 self.output_stream = self.audio.open(
                     format=FORMAT,
@@ -157,6 +277,9 @@ class RealtimeClient:
             scam_score: Scam score (1-10)
             response_text: Description of the scam
         """
+        if not self.fcm_token:
+            print("No FCM token available, skipping notification")
+            return False
 
         category_info = get_scam_category(scam_score)
 
@@ -228,7 +351,7 @@ class RealtimeClient:
             }
         }
         await self.ws.send(json.dumps(session_update))
-        print(f"Session configured with system instructions {self.SYSTEM_INSTRUCTIONS}")
+        print(f"Session configured with scam detection instructions")
 
     async def send_audio(self):
         """Capture and send audio"""
@@ -238,8 +361,10 @@ class RealtimeClient:
                 if self.source == "mic":
                     audio_data = self.input_stream.read(CHUNK, exception_on_overflow=False)
                 elif self.source == "arecord":
+                    # Read correct amount for 24000 Hz
                     audio_data = self.arecord_process.stdout.read(CHUNK * 2)
-                    if not audio_data:
+                    if not audio_data or len(audio_data) == 0:
+                        print("No audio data from arecord, stream ended")
                         break
 
                 audio_base64 = base64.b64encode(audio_data).decode('utf-8')
@@ -311,6 +436,7 @@ class RealtimeClient:
             self.output_stream.close()
         if self.arecord_process:
             self.arecord_process.terminate()
+            self.arecord_process.wait(timeout=2)
         self.audio.terminate()
         print("Audio resources cleaned up")
 
@@ -319,6 +445,7 @@ realtime_client: RealtimeClient = None
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--source", choices=["mic", "arecord"], default="mic", help="Audio input source")
+parser.add_argument("--bluetooth-source", default=None, help="Specific PulseAudio source name for Bluetooth")
 parser.add_argument("--host", default="0.0.0.0")
 parser.add_argument("--port", type=int, default=8000)
 args, _ = parser.parse_known_args()
@@ -338,16 +465,14 @@ class CallEndEvent(BaseModel):
 @app.post("/call/start")
 async def call_start(event: CallStartEvent):
     global realtime_client, APP_CONFIG
-    await save_call_data(
-                            user_uuid=user_uuid,
-                            scam_score=5,
-                            other_person_phone="1234567890",
-                            call_id="0987654321"
-                        )   
     instructions = SYSTEM_INSTRUCTIONS + f"\n\nThe caller {event.phone_number} is {'known' if event.exists_in_contacts else 'unknown'} to the user, keep this in context."
+    
     if realtime_client is None:
-        realtime_client = RealtimeClient(source=APP_CONFIG.source, instructions=instructions)
-
+        realtime_client = RealtimeClient(
+            source=APP_CONFIG.source, 
+            instructions=instructions,
+            bluetooth_source=APP_CONFIG.bluetooth_source
+        )
         realtime_client.phone_number = event.phone_number
         realtime_client.fcm_token = event.fcm_token
 
@@ -355,7 +480,6 @@ async def call_start(event: CallStartEvent):
         return {"status": "Realtime scam detection started"}
     else:
         realtime_client.SYSTEM_INSTRUCTIONS = instructions
-
         realtime_client.phone_number = event.phone_number
         realtime_client.fcm_token = event.fcm_token
 
@@ -371,5 +495,9 @@ async def call_end(event: CallEndEvent):
         return {"status": f"Call ended, duration {event.duration}s, realtime client cleaned up"}
     return {"status": "No active call to end"}
 
+@app.get("/ping")
+async def test_route():
+    return {"msg":"pong"}
+
 if __name__ == "__main__":
-    uvicorn.run("main:app", host=args.host, port=8080, reload=True)
+    uvicorn.run("main:app", host=args.host, port=8000, reload=True)
