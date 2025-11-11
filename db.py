@@ -9,10 +9,9 @@ MONGO_URI = os.environ.get("MONGO_URI")
 mongo_client = AsyncIOMotorClient(MONGO_URI)
 db = mongo_client["scam_detection"]
 
-calls_collection = db["calls"]  # Each call = one document
+calls_collection = db["calls"]
 
 
-# ---------------- Calls ----------------
 async def save_call_data(user_uuid: str, scam_score: int, phone_number: str, call_id: str):
     """
     Save each call as a separate document in the 'calls' collection.
@@ -29,7 +28,7 @@ async def save_call_data(user_uuid: str, scam_score: int, phone_number: str, cal
         "call_id": call_id,
         "phone_number": phone_number,
         "scam_score": scam_score,
-        "timestamp": datetime.now(timezone.utc),  # precise UTC timestamp
+        "timestamp": datetime.now(timezone.utc),
     }
 
     result = await calls_collection.insert_one(call_doc)
